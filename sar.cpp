@@ -8,22 +8,12 @@
 #include <sys/types.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <net/if.h>
 
 #include <algorithm>
 
 namespace Sar {
 
-const int MAX_PF_NAME = 1024;
-
-static const int MAX_CPU_NR = 128;
-static const int MAX_NET_DEV_NR = 16;
-static const int MAX_DISK_NR = 32;
-
-static const int NR_IFACE_PREALLOC = 2;
-static const int NR_DEV_PREALLOC = 4;
-static const int NR_DISK_PREALLOC = 3;
-
-static const int STATS_NET_DEV_SIZE	= sizeof(StatsNetDev);
 
 static StatsOneCpu stats_one_cpu[2][MAX_CPU_NR];
 static StatsNetDev stats_net_dev[2][MAX_NET_DEV_NR];
@@ -956,6 +946,170 @@ static void get_itv_value(
 }
 
 
+static int check_iface_reg(StatsNetDev st_net_dev[][MAX_NET_DEV_NR],
+							short curr, short ref, unsigned int pos)
+{
+	StatsNetDev *st_net_dev_i, *st_net_dev_j;
+	st_net_dev_i = st_net_dev[curr] + pos;
+
+	int index = 0;
+	while (index < g_iface_nr) {
+		st_net_dev_j = st_net_dev[ref] + index;
+		if (!strcmp(st_net_dev_i->interface, st_net_dev_j->interface)) {
+			/*
+			 * Network interface found.
+			 * If a counter has decreased, then we may assume that the
+			 * corresponding interface was unregistered, then registered again.
+			 */
+			if ((st_net_dev_i->rx_packets < st_net_dev_j->rx_packets) ||
+					(st_net_dev_i->tx_packets < st_net_dev_j->tx_packets) ||
+					(st_net_dev_i->rx_bytes < st_net_dev_j->rx_bytes) ||
+					(st_net_dev_i->tx_bytes < st_net_dev_j->tx_bytes) ||
+					(st_net_dev_i->rx_compressed < st_net_dev_j->rx_compressed) ||
+					(st_net_dev_i->tx_compressed < st_net_dev_j->tx_compressed) ||
+					(st_net_dev_i->multicast < st_net_dev_j->multicast) ||
+					(st_net_dev_i->rx_errors < st_net_dev_j->rx_errors) ||
+					(st_net_dev_i->tx_errors < st_net_dev_j->tx_errors) ||
+					(st_net_dev_i->collisions < st_net_dev_j->collisions) ||
+					(st_net_dev_i->rx_dropped < st_net_dev_j->rx_dropped) ||
+					(st_net_dev_i->tx_dropped < st_net_dev_j->tx_dropped) ||
+					(st_net_dev_i->tx_carrier_errors < st_net_dev_j->tx_carrier_errors) ||
+					(st_net_dev_i->rx_frame_errors < st_net_dev_j->rx_frame_errors) ||
+					(st_net_dev_i->rx_fifo_errors < st_net_dev_j->rx_fifo_errors) ||
+					(st_net_dev_i->tx_fifo_errors < st_net_dev_j->tx_fifo_errors)) {
+
+				/*
+				 * Special processing for rx_bytes (_packets) and tx_bytes (_packets)
+				 * counters: If the number of bytes (packets) has decreased, whereas
+				 * the number of packets (bytes) has increased, then assume that the
+				 * relevant counter has met an overflow condition, and that the
+				 * interface was not unregistered, which is all the more plausible
+				 * that the previous value for the counter was > ULONG_MAX/2.
+				 * NB: the average value displayed will be wrong in this case...
+				 *
+				 * If such an overflow is detected, just set the flag. There is no
+				 * need to handle this in a special way: the difference is still
+				 * properly calculated if the result is of the same type (i.e.
+				 * unsigned long) as the two values.
+				 */
+				int ovfw = FALSE;
+
+				if ((st_net_dev_i->rx_bytes < st_net_dev_j->rx_bytes) &&
+						(st_net_dev_i->rx_packets > st_net_dev_j->rx_packets) &&
+						(st_net_dev_j->rx_bytes > (~0UL >> 1))) {
+					ovfw = TRUE;
+				}
+				if ((st_net_dev_i->tx_bytes < st_net_dev_j->tx_bytes) &&
+						(st_net_dev_i->tx_packets > st_net_dev_j->tx_packets) &&
+						(st_net_dev_j->tx_bytes > (~0UL >> 1))) {
+					ovfw = TRUE;
+				}
+				if ((st_net_dev_i->rx_packets < st_net_dev_j->rx_packets) &&
+						(st_net_dev_i->rx_bytes > st_net_dev_j->rx_bytes) &&
+						(st_net_dev_j->rx_packets > (~0UL >> 1))) {
+					ovfw = TRUE;
+				}
+				if ((st_net_dev_i->tx_packets < st_net_dev_j->tx_packets) &&
+						(st_net_dev_i->tx_bytes > st_net_dev_j->tx_bytes) &&
+						(st_net_dev_j->tx_packets > (~0UL >> 1))) {
+					ovfw = TRUE;
+				}
+
+				if (!ovfw) {
+					/* OK: assume here that the device was actually unregistered */
+					memset(st_net_dev_j, 0, STATS_NET_DEV_SIZE);
+					strcpy(st_net_dev_j->interface, st_net_dev_i->interface);
+				}
+			}
+			return index;
+		}
+		index++;
+	}
+
+	/* Network interface not found: Look for the first free structure */
+	for (index = 0; index < g_iface_nr; index++) {
+		st_net_dev_j = st_net_dev[ref] + index;
+		if (!strcmp(st_net_dev_j->interface, "?")) {
+			memset(st_net_dev_j, 0, STATS_NET_DEV_SIZE);
+			strcpy(st_net_dev_j->interface, st_net_dev_i->interface);
+			break;
+		}
+	}
+	if (index >= g_iface_nr) {
+		/* No free structure: Default is structure of same rank */
+		index = pos;
+	}
+
+	st_net_dev_j = st_net_dev[ref] + index;
+	/* Since the name is not the same, reset all the structure */
+	memset(st_net_dev_j, 0, STATS_NET_DEV_SIZE);
+	strcpy(st_net_dev_j->interface, st_net_dev_i->interface);
+
+	return  index;
+}
+
+
+/*
+ * Disks may be registered dynamically (true in /proc/stat file).
+ * This is what we try to guess here.
+ */
+static int check_disk_reg(DiskStats st_disk[][MAX_DISK_NR],
+		   short curr, short ref, int pos)
+{
+	DiskStats *st_disk_i, *st_disk_j;
+	int index = 0;
+
+	st_disk_i = st_disk[curr] + pos;
+
+	while (index < g_disk_nr) {
+		st_disk_j = st_disk[ref] + index;
+		if ((st_disk_i->major == st_disk_j->major) &&
+				(st_disk_i->minor == st_disk_j->minor)) {
+			/*
+			 * Disk found.
+			 * If a counter has decreased, then we may assume that the
+			 * corresponding device was unregistered, then registered again.
+			 * NB: AFAIK, such a device cannot be unregistered with current
+			 * kernels.
+			 */
+			if ((st_disk_i->nr_ios < st_disk_j->nr_ios) ||
+					(st_disk_i->rd_sect < st_disk_j->rd_sect) ||
+					(st_disk_i->wr_sect < st_disk_j->wr_sect)) {
+
+				memset(st_disk_j, 0, DISK_STATS_SIZE);
+				st_disk_j->major = st_disk_i->major;
+				st_disk_j->minor = st_disk_i->minor;
+			}
+			return index;
+		}
+		index++;
+	}
+
+	/* Disk not found: Look for the first free structure */
+	for (index = 0; index < g_disk_nr; index++) {
+		st_disk_j = st_disk[ref] + index;
+		if (!(st_disk_j->major + st_disk_j->minor)) {
+			memset(st_disk_j, 0, DISK_STATS_SIZE);
+			st_disk_j->major = st_disk_i->major;
+			st_disk_j->minor = st_disk_i->minor;
+			break;
+		}
+	}
+	if (index >= g_disk_nr) {
+		/* No free structure found: Default is structure of same rank */
+		index = pos;
+	}
+
+	st_disk_j = st_disk[ref] + index;
+	/* Since the device is not the same, reset all the structure */
+	memset(st_disk_j, 0, DISK_STATS_SIZE);
+	st_disk_j->major = st_disk_i->major;
+	st_disk_j->minor = st_disk_i->minor;
+
+	return index;
+}
+
+
 static int init()
 {
 	memset(stats_one_cpu, 0, sizeof(stats_one_cpu));
@@ -968,7 +1122,8 @@ static int init()
 	g_hz = get_HZ();
 	g_shift = get_kb_shift();
 
-	if (g_hz <= 0 || g_shift < 0) {
+	if (g_cpu_nr > MAX_CPU_NR || g_disk_nr > MAX_DISK_NR || 
+		g_iface_nr > MAX_IFACE_LEN || g_hz <= 0 || g_shift < 0) {
 		printf("g_shift error.\n");
 		return -1;
 	}
@@ -1032,13 +1187,15 @@ int get_sar_info(SarInfo &sar_info) {
 	FileStats file_stats[2];
 	memset(file_stats, 0, sizeof(file_stats));
 
-	ret += read_stats(file_stats[0], 0);
-	/* TODO sleep? */
-	ret += read_stats(file_stats[1], 1);
+	int curr = 1, prev = 0;
+
+	ret += read_stats(file_stats[prev], prev);
+	sleep(1);
+	ret += read_stats(file_stats[curr], curr);
 
 	/* all data is collected */
-	const FileStats &f_prev = file_stats[0];
-	const FileStats &f_curr = file_stats[1];
+	const FileStats &f_prev = file_stats[prev];
+	const FileStats &f_curr = file_stats[curr];
 	unsigned long long itv = 0, g_itv = 0;
 
 	get_itv_value(f_curr, f_prev, g_cpu_nr, &itv, &g_itv);
@@ -1082,6 +1239,81 @@ int get_sar_info(SarInfo &sar_info) {
 	double frmpg = s_value((double) PG(f_prev.frmkb), (double) PG(f_curr.frmkb), itv);
 	double bufpg = s_value((double) PG(f_prev.bufkb), (double) PG(f_curr.bufkb), itv);
 	double campg = s_value((double) PG(f_prev.camkb), (double) PG(f_curr.camkb), itv);
+
+	/* network interface statistics */
+	StatsNetDev *sndi = stats_net_dev[curr], *sndj;
+	sar_info.nr_sar_interface_info = 0;
+	for (int i = 0; i < g_iface_nr; ++i, ++sndi) {
+		if (!strcmp(sndi->interface, "?")) {
+			continue;
+		}
+		int j = check_iface_reg(stats_net_dev, curr, prev, i);
+		sndj = stats_net_dev[prev] + j;
+		int &nr_sar_interface_info = sar_info.nr_sar_interface_info;
+		SarInterfaceInfo &sar_interface_info = sar_info.sar_interface_info[nr_sar_interface_info];
+		strncpy(sar_interface_info.interface,
+		sndi->interface, MAX_IFACE_LEN-1);
+		sar_interface_info.interface[MAX_IFACE_LEN-1] = '\0';
+		sar_interface_info.rxpck = s_value(sndj->rx_packets, sndi->rx_packets, itv);
+		sar_interface_info.txpck = s_value(sndj->tx_packets, sndi->tx_packets, itv);
+		sar_interface_info.rxbyt = s_value(sndj->rx_bytes, sndi->rx_bytes, itv);
+		sar_interface_info.txbyt = s_value(sndj->tx_bytes, sndi->tx_bytes, itv);
+		sar_interface_info.rxcmp = s_value(sndj->rx_compressed, sndi->rx_compressed, itv);
+		sar_interface_info.txcmp = s_value(sndj->tx_compressed, sndi->tx_compressed, itv);
+		sar_interface_info.rxmcst = s_value(sndj->multicast, sndi->multicast, itv);
+
+		/* network interface statistics (errors) */
+		sar_interface_info.rxerr = s_value(sndj->rx_errors, sndi->rx_errors, itv);
+		sar_interface_info.txerr = s_value(sndj->tx_errors, sndi->tx_errors, itv);
+		sar_interface_info.coll = s_value(sndj->collisions, sndi->collisions, itv);
+		sar_interface_info.rxdrop = s_value(sndj->rx_dropped, sndi->rx_dropped, itv);
+		sar_interface_info.txdrop = s_value(sndj->tx_dropped, sndi->tx_dropped, itv);
+		sar_interface_info.txcarr = s_value(sndj->tx_carrier_errors, sndi->tx_carrier_errors, itv);
+		sar_interface_info.rxfram = s_value(sndj->rx_frame_errors, sndi->rx_frame_errors, itv);
+		sar_interface_info.rxfifo = s_value(sndj->rx_fifo_errors, sndi->rx_fifo_errors, itv);
+		sar_interface_info.txfifo = s_value(sndj->tx_fifo_errors, sndi->tx_fifo_errors, itv);
+
+		++nr_sar_interface_info;
+	}
+
+	/* disk statistics */
+	DiskStats *sdi = disk_stats[curr], *sdj;
+	sar_info.nr_sar_disk_info = 0;
+	for (int i = 0; i < g_disk_nr; i++, ++sdi) {
+		double tput, util, await, svctm, arqsz;
+		if (!(sdi->major + sdi->minor)) {
+			continue;
+		}
+		int j = check_disk_reg(disk_stats, curr, prev, i);
+
+		sdj = disk_stats[prev] + j;
+
+		tput = ((double) (sdi->nr_ios - sdj->nr_ios)) * g_hz / itv;
+		util = s_value(sdj->tot_ticks, sdi->tot_ticks, itv);
+		svctm = tput ? util / tput : 0.0;
+		await = (sdi->nr_ios - sdj->nr_ios) ?
+			((sdi->rd_ticks - sdj->rd_ticks) + (sdi->wr_ticks - sdj->wr_ticks)) /
+			((double) (sdi->nr_ios - sdj->nr_ios)) : 0.0;
+		arqsz  = (sdi->nr_ios - sdj->nr_ios) ?
+			((sdi->rd_sect - sdj->rd_sect) + (sdi->wr_sect - sdj->wr_sect)) /
+			((double) (sdi->nr_ios - sdj->nr_ios)) : 0.0;
+
+		int &nr_sar_disk_info = sar_info.nr_sar_disk_info;
+		SarDiskInfo &sar_disk_info = sar_info.sar_disk_info[nr_sar_disk_info];
+
+		sar_disk_info.tps = s_value(sdj->nr_ios, sdi->nr_ios,  itv);
+		sar_disk_info.rd_sec = ll_s_value(sdj->rd_sect, sdi->rd_sect, itv);
+		sar_disk_info.wr_sec = ll_s_value(sdj->wr_sect, sdi->wr_sect, itv);
+		/* See iostat for explanations */
+		sar_disk_info.avgrq_sz = arqsz;
+		sar_disk_info.avgqu_sz = s_value(sdj->rq_ticks, sdi->rq_ticks, itv) / 1000.0;
+		sar_disk_info.await = await;
+		sar_disk_info.svctm = svctm;
+		sar_disk_info.util = util / 10.0;
+
+		++nr_sar_disk_info;
+	}
+
 
 	return ret;
 }

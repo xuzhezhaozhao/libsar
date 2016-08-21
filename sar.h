@@ -1,7 +1,6 @@
 #ifndef _SAR_H
 #define _SAR_H
 
-#include <net/if.h>
 
 namespace Sar {
 
@@ -10,9 +9,22 @@ namespace Sar {
 #define IFNAMSIZ	16
 #endif
 
+#define FALSE	0
+#define TRUE	1
+
+/* TODO */
 /* Maximum length of network interface name */
 const int MAX_IFACE_LEN = IFNAMSIZ;
 
+const int MAX_CPU_NR = 128;
+const int MAX_NET_DEV_NR = 16;
+const int MAX_DISK_NR = 64;
+
+const int MAX_PF_NAME = 1024;
+
+const int NR_IFACE_PREALLOC = 2;
+const int NR_DEV_PREALLOC = 4;
+const int NR_DISK_PREALLOC = 3;
 
 /* Files */
 #define STAT		"/proc/stat"
@@ -189,7 +201,51 @@ struct Tstamp {
 	int use;
 };
 
+const int STATS_NET_DEV_SIZE = sizeof(StatsNetDev);
+const int DISK_STATS_SIZE =	sizeof(DiskStats);
+
+struct SarInterfaceInfo {
+	/* network interface statistics */
+	double rxpck;
+	double txpck;
+	double rxbyt;
+	double txbyt;
+	double rxcmp;
+	double txcmp;
+	double rxmcst;
+
+	/* network interface statistics (errors) */
+	double rxerr;
+	double txerr;
+	double coll;
+	double rxdrop;
+	double txdrop;
+	double txcarr;
+	double rxfram;
+	double rxfifo;
+	double txfifo;
+
+	char interface[MAX_IFACE_LEN];
+};
+
+
+struct SarDiskInfo {
+	double tps;
+	double rd_sec;
+	double wr_sec;
+	double avgrq_sz;
+	double avgqu_sz;
+	double await;
+	double svctm;
+	double util;
+};
+
 struct SarInfo {
+	int nr_sar_interface_info;
+	SarInterfaceInfo sar_interface_info[MAX_NET_DEV_NR];
+
+	int nr_sar_disk_info;
+	SarDiskInfo sar_disk_info[MAX_DISK_NR];
 };
 
 
