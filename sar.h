@@ -45,6 +45,11 @@ const int MAX_IFACE_LEN = IFNAMSIZ;
 #define LOADAVG		"/proc/loadavg"
 #define VMSTAT		"/proc/vmstat"
 
+/*
+ * kB -> number of pages.
+ * Page size depends on machine architecture (4 kB, 8 kB, 16 kB, 64 kB...)
+ */
+#define PG(k)	((k) >> (g_shift))
 
 struct FileStats {
 	/* --- LONG LONG --- */
@@ -183,6 +188,10 @@ struct Tstamp {
 	int tm_hour;
 	int use;
 };
+
+struct SarInfo {
+};
+
 
 int get_sar_info(SarInfo &sar_info);
 

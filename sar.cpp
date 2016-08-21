@@ -25,13 +25,15 @@ static const int NR_DISK_PREALLOC = 3;
 
 static const int STATS_NET_DEV_SIZE	= sizeof(StatsNetDev);
 
-static StatsOneCpu stats_one_cpu[MAX_CPU_NR];
-static StatsNetDev stats_net_dev[MAX_NET_DEV_NR];
-static DiskStats disk_stats[MAX_DISK_NR];
+static StatsOneCpu stats_one_cpu[2][MAX_CPU_NR];
+static StatsNetDev stats_net_dev[2][MAX_NET_DEV_NR];
+static DiskStats disk_stats[2][MAX_DISK_NR];
 
 static int g_cpu_nr;		/* number of processors on this machine */ 
 static int g_disk_nr;	/* number of devices in /proc/stat */
 static int g_iface_nr;	/* number of network devices (interfaces) */
+static int g_hz;
+static int g_shift;
 
 /* Get page shift in kB */
 static int get_kb_shift()
@@ -338,12 +340,13 @@ int get_net_dev(void)
 }
 
 /* Read stats from /proc/stat */
-static int read_proc_stat(FileStats &file_stats)
+static int read_proc_stat(FileStats &file_stats, int curr)
 {
 	FILE *fp;
 	if ((fp = fopen(STAT, "r")) == NULL) {
 		/* fprintf(stderr, _("Cannot open %s: %s\n"), STAT, strerror(errno)); */
 		/* exit(2); */
+		printf("read proc stat error.\n");
 		return -1;
 	}
 
@@ -406,7 +409,7 @@ static int read_proc_stat(FileStats &file_stats)
 
 				StatsOneCpu *st_cpu_i = NULL;
 				if (proc_nb < g_cpu_nr) {
-					st_cpu_i = stats_one_cpu + proc_nb;
+					st_cpu_i = stats_one_cpu[curr] + proc_nb;
 					st_cpu_i->per_cpu_user   = cc_user;
 					st_cpu_i->per_cpu_nice   = cc_nice;
 					st_cpu_i->per_cpu_system = cc_system;
@@ -461,6 +464,7 @@ static int read_proc_meminfo(FileStats &file_stats)
 {
 	FILE *fp;
 	if ((fp = fopen(MEMINFO, "r")) == NULL) {
+		printf("read proc meminfo error.\n");
 		return -1;
 	}
 
@@ -507,6 +511,7 @@ static int read_proc_loadavg(FileStats &file_stats)
 {
 	FILE *fp;
 	if ((fp = fopen(LOADAVG, "r")) == NULL) {
+		printf("read proc loadavg error.\n");
 		return -1;
 	}
 
@@ -536,6 +541,7 @@ static int read_proc_vmstat(FileStats &file_stats)
 {
 	FILE *fp;
 	if ((fp = fopen(VMSTAT, "r")) == NULL) {
+		printf("read proc vmstat error.\n");
 		return -1;
 	}
 
@@ -653,10 +659,11 @@ static int read_ktables_stat(FileStats &file_stats)
 }
 
 /* Read stats from /proc/net/dev */
-static int read_net_dev_stat(FileStats &file_stats)
+static int read_net_dev_stat(FileStats &file_stats, int curr)
 {
 	FILE *fp;
 	if ((fp = fopen(NET_DEV, "r")) == NULL) {
+		printf("read net dev stat error.\n");
 		return -1;
 	}
 
@@ -667,7 +674,7 @@ static int read_net_dev_stat(FileStats &file_stats)
 		int pos = strcspn(line, ":");
 		StatsNetDev *stats_net_dev_i = NULL;
 		if (pos < strlen(line)) {
-			stats_net_dev_i = stats_net_dev + dev;
+			stats_net_dev_i = stats_net_dev[curr] + dev;
 			strncpy(iface, line, std::min(pos, MAX_IFACE_LEN - 1));
 			iface[std::min(pos, MAX_IFACE_LEN - 1)] = '\0';
 			/* Skip heading spaces */
@@ -698,14 +705,14 @@ static int read_net_dev_stat(FileStats &file_stats)
 
 	if (dev < g_iface_nr) {
 		/* Reset unused structures */
-		memset(stats_net_dev + dev, 0, STATS_NET_DEV_SIZE * (g_iface_nr - dev));
+		memset(stats_net_dev[curr] + dev, 0, STATS_NET_DEV_SIZE * (g_iface_nr - dev));
 
 		while (dev < g_iface_nr) {
 			/*
 			 * Nb of network interfaces has changed, or appending data to an
 			 * old file with more interfaces than are actually available now.
 			 */
-			StatsNetDev *stats_net_dev_i = stats_net_dev + dev++;
+			StatsNetDev *stats_net_dev_i = stats_net_dev[curr] + dev++;
 			strcpy(stats_net_dev_i->interface, "?");
 		}
 	}
@@ -718,6 +725,7 @@ static int read_net_sock_stat(FileStats &file_stats)
 {
 	FILE *fp;
 	if ((fp = fopen(NET_SOCKSTAT, "r")) == NULL) {
+		printf("read net sock stat error.\n");
 		return -1;
 	}
 
@@ -754,6 +762,7 @@ static int read_net_nfs_stat(FileStats &file_stats)
 {
 	FILE *fp;
 	if ((fp = fopen(NET_RPC_NFS, "r")) == NULL) {
+		printf("read net nfs stat error.\n");
 		return -1;
 	}
 
@@ -779,6 +788,7 @@ static int read_net_nfsd_stat(FileStats &file_stats)
 {
 	FILE *fp;
 	if ((fp = fopen(NET_RPC_NFSD, "r")) == NULL) {
+		printf("read net nfsd stat error.\n");
 		return -1;
 	}
 
@@ -817,7 +827,7 @@ static void init_dk_drive_stat(FileStats &file_stats)
 }
 
 /* Read stats from /proc/diskstats */
-static int read_diskstats_stat(FileStats &file_stats)
+static int read_diskstats_stat(FileStats &file_stats, int curr)
 {
 	FILE *fp;
 	if ((fp = fopen(DISKSTATS, "r")) == NULL) {
@@ -843,7 +853,7 @@ static int read_diskstats_stat(FileStats &file_stats)
 				/* Unused device: ignore it */
 				continue;
 			}
-			DiskStats *disk_stats_i = disk_stats + dsk++;
+			DiskStats *disk_stats_i = disk_stats[curr] + dsk++;
 			disk_stats_i->major = major;
 			disk_stats_i->minor = minor;
 			disk_stats_i->nr_ios = rd_ios + wr_ios;
@@ -869,7 +879,7 @@ static int read_diskstats_stat(FileStats &file_stats)
 		 * Nb of disks has changed, or appending data to an old file
 		 * with more disks than are actually available now.
 		 */
-		DiskStats *disk_stats_i = disk_stats + dsk++;
+		DiskStats *disk_stats_i = disk_stats[curr] + dsk++;
 		disk_stats_i->major = disk_stats_i->minor = 0;
 	}
 	return 0;
@@ -879,10 +889,10 @@ static int read_diskstats_stat(FileStats &file_stats)
 /* TODO */
 /* static int read_ppartitions_stat(FileStats &file_stats) */
 
-static int read_stats(FileStats &file_stats)
+static int read_stats(FileStats &file_stats, int curr)
 {
 	int ret = 0;
-	ret += read_proc_stat(file_stats);
+	ret += read_proc_stat(file_stats, curr);
 	ret += read_proc_meminfo(file_stats);
 	ret += read_proc_loadavg(file_stats);
 	ret += read_proc_vmstat(file_stats);
@@ -890,20 +900,63 @@ static int read_stats(FileStats &file_stats)
 	ret += read_net_sock_stat(file_stats);
 	ret += read_net_nfs_stat(file_stats);
 	ret += read_net_nfsd_stat(file_stats);
-	ret += read_diskstats_stat(file_stats);
-	ret += read_net_dev_stat(file_stats);
-
-	if (ret < 0) {
-		ret = -1;
-	}
-
-
+	ret += read_diskstats_stat(file_stats, curr);
+	ret += read_net_dev_stat(file_stats, curr);
 
 	return ret;
 }
 
 
-static void init()
+
+/*
+ * Set interval value.
+ * g_itv is the interval in jiffies multiplied by the # of proc.
+ * itv is the interval in jiffies.
+ */
+static void get_itv_value(
+		const FileStats &file_stats_curr,
+		const FileStats &file_stats_prev,
+		int nr_proc,
+		unsigned long long *itv, unsigned long long *g_itv)
+{
+	/* Interval value in jiffies */
+	if (!file_stats_prev.uptime) {
+		/*
+		 * Stats from boot time to be displayed: only in this case we admit
+		 * that the interval (which is unsigned long long) may be greater
+		 * than 0xffffffff, else it was an overflow.
+		 */
+		*g_itv = file_stats_curr.uptime;
+	}
+	else {
+		*g_itv = (file_stats_curr.uptime - file_stats_prev.uptime) & 0xffffffff;
+	}
+
+	if (!(*g_itv)) {
+		/* Paranoia checking */
+		*g_itv = 1;
+	}
+
+	if (nr_proc > 1) {
+		if (!file_stats_prev.uptime0) {
+			*itv = file_stats_curr.uptime0;
+		}
+		else {
+			*itv = (file_stats_curr.uptime0 - file_stats_prev.uptime0) 
+				& 0xffffffff;
+		}
+
+		if (!(*itv)) {
+			*itv = 1;
+		}
+	}
+	else {
+		*itv = *g_itv;
+	}
+}
+
+
+static int init()
 {
 	memset(stats_one_cpu, 0, sizeof(stats_one_cpu));
 	memset(stats_net_dev, 0, sizeof(stats_net_dev));
@@ -912,18 +965,139 @@ static void init()
 	g_cpu_nr = get_cpu_nr();
 	g_disk_nr = get_diskstats_dev_nr(0, 1) + NR_DISK_PREALLOC;
 	g_iface_nr = get_net_dev();
-}
+	g_hz = get_HZ();
+	g_shift = get_kb_shift();
 
-int get_file_stats(FileStats &file_stats) {
-	struct tm rectime;
-	file_stats.ust_time = get_time(rectime);
-	file_stats.hour = rectime.tm_hour;
-	file_stats.minute = rectime.tm_min;
-	file_stats.second = rectime.tm_sec;
-
-	init();
-
+	if (g_hz <= 0 || g_shift < 0) {
+		printf("g_shift error.\n");
+		return -1;
+	}
 	return 0;
 }
 
+template <typename T, typename U, typename Q>
+static double s_value(T m, U n, Q p)
+{
+	return (((double) ((n) - (m))) / (p) * g_hz);
 }
+
+template <typename T, typename U, typename Q>
+static double sp_value(T m, U n, Q p)
+{
+	return (((double) ((n) - (m))) / (p) * 100);
+}
+
+/*
+ * Handle overflow conditions properly for counters which are read as
+ * unsigned long long, but which can be unsigned long long or
+ * unsigned long only depending on the kernel version used.
+ * @value1 and @value2 being two values successively read for this
+ * counter, if @value2 < @value1 and @value1 <= 0xffffffff, then we can
+ * assume that the counter's type was unsigned long and has overflown, and
+ * so the difference @value2 - @value1 must be casted to this type.
+ * NOTE: These functions should no longer be necessary to handle a particular
+ * stat counter when we can assume that everybody is using a recent kernel
+ * (defining this counter as unsigned long long).
+ */
+static double ll_sp_value(unsigned long long value1, unsigned long long value2,
+		unsigned long long itv)
+{
+	if ((value2 < value1) && (value1 <= 0xffffffff)) {
+		/* Counter's type was unsigned long and has overflown */
+		return ((double) ((value2 - value1) & 0xffffffff)) / itv * 100;
+	}
+	else {
+		return sp_value(value1, value2, itv);
+	}
+}
+static double ll_s_value(unsigned long long value1, unsigned long long value2,
+		unsigned long long itv)
+{
+	if ((value2 < value1) && (value1 <= 0xffffffff)) {
+		/* Counter's type was unsigned long and has overflown */
+		return ((double) ((value2 - value1) & 0xffffffff)) / itv * g_hz;
+	}
+	else {
+		return s_value(value1, value2, itv);
+	}
+}
+
+int get_sar_info(SarInfo &sar_info) {
+	if (init() < 0) {
+		/* fatal error */
+		return -1;
+	}
+
+	int ret = 0;
+	FileStats file_stats[2];
+	memset(file_stats, 0, sizeof(file_stats));
+
+	ret += read_stats(file_stats[0], 0);
+	/* TODO sleep? */
+	ret += read_stats(file_stats[1], 1);
+
+	/* all data is collected */
+	const FileStats &f_prev = file_stats[0];
+	const FileStats &f_curr = file_stats[1];
+	unsigned long long itv = 0, g_itv = 0;
+
+	get_itv_value(f_curr, f_prev, g_cpu_nr, &itv, &g_itv);
+	if (itv == 0 || g_itv == 0) {
+		printf("itv or g_itv error.\n");
+		return -1;
+	}
+
+	/* number of context switches per second */
+	double nr_processes = ll_s_value(f_prev.context_swtch, 
+			f_curr.context_swtch, itv);
+
+
+	/* CPU usage */
+	double cpu_user = ll_sp_value(f_prev.cpu_user, f_curr.cpu_user, g_itv);
+	double cpu_nice = ll_sp_value(f_prev.cpu_nice, f_curr.cpu_nice, g_itv);
+	double cpu_system =	ll_sp_value(f_prev.cpu_system, f_curr.cpu_system, g_itv);
+	double cpu_iowait = ll_sp_value(f_prev.cpu_iowait, f_curr.cpu_iowait, g_itv);
+	double cpu_steal =	ll_sp_value(f_prev.cpu_steal, f_curr.cpu_steal, g_itv);
+	double cpu_idle = f_curr.cpu_idle < f_prev.cpu_idle ?  0.0 :
+					ll_sp_value(f_prev.cpu_idle, f_curr.cpu_idle, g_itv);
+
+	/* paging statistics */
+	double pgpgin = s_value(f_prev.pgpgin, f_curr.pgpgin, itv);
+	double pgpgout = s_value(f_prev.pgpgout, f_curr.pgpgout, itv);
+	double pgfault = s_value(f_prev.pgfault, f_curr.pgfault, itv);
+	double pgmajfault =s_value(f_prev.pgmajfault, f_curr.pgmajfault, itv);
+
+	/* number of swap pages brought in and out */
+	double pswpin = s_value(f_prev.pswpin, f_curr.pswpin, itv);
+	double pswpout = s_value(f_prev.pswpout, f_curr.pswpout, itv);
+
+	/* I/O stats (no distinction made between disks) */
+	double tps = s_value(f_prev.dk_drive, f_curr.dk_drive, itv);
+	double rtps = s_value(f_prev.dk_drive_rio, f_curr.dk_drive_rio, itv);
+	double wtps = s_value(f_prev.dk_drive_wio, f_curr.dk_drive_wio, itv);
+	double bread = s_value(f_prev.dk_drive_rblk, f_curr.dk_drive_rblk, itv);
+	double bwrtn = s_value(f_prev.dk_drive_wblk, f_curr.dk_drive_wblk, itv);
+
+	/* memory stats */
+	double frmpg = s_value((double) PG(f_prev.frmkb), (double) PG(f_curr.frmkb), itv);
+	double bufpg = s_value((double) PG(f_prev.bufkb), (double) PG(f_curr.bufkb), itv);
+	double campg = s_value((double) PG(f_prev.camkb), (double) PG(f_curr.camkb), itv);
+
+	return ret;
+}
+
+}
+
+#ifdef SAR_UNIT_TEST
+int main(int argc, char *argv[])
+{
+	Sar::SarInfo si;
+
+	int ret;
+	if ((ret = Sar::get_sar_info(si)) < 0) {
+		printf("error: %d\n", ret);
+	}
+	
+	return 0;
+}
+#endif
