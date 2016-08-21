@@ -1,16 +1,18 @@
 #ifndef _SAR_H
 #define _SAR_H
 
-#define MAX_PF_NAME	1024
+#include <net/if.h>
 
+namespace Sar {
 
 /* Get IFNAMSIZ */
-#include <net/if.h>
 #ifndef IFNAMSIZ
 #define IFNAMSIZ	16
 #endif
+
 /* Maximum length of network interface name */
-#define MAX_IFACE_LEN	IFNAMSIZ
+const int MAX_IFACE_LEN = IFNAMSIZ;
+
 
 /* Files */
 #define STAT		"/proc/stat"
@@ -44,10 +46,7 @@
 #define VMSTAT		"/proc/vmstat"
 
 
-
-#define NR_IFACE_PREALLOC	2
-
-struct SarInfo {
+struct FileStats {
 	/* --- LONG LONG --- */
 	/* Machine uptime (multiplied by the # of proc) */
 	unsigned long long uptime			__attribute__ ((aligned (16)));
@@ -123,16 +122,70 @@ struct SarInfo {
 	unsigned int  nfsd_getattcnt			__attribute__ ((packed));
 	/* --- CHAR --- */
 	/* Record type: R_STATS or R_DUMMY */
-	unsigned char record_type			__attribute__ ((packed));
+	/* unsigned char record_type; */
 	/*
 	 * Time stamp: hour, minute and second.
 	 * Used to determine TRUE time (immutable, non locale dependent time).
 	 */
-	unsigned char hour		/* (0-23) */	__attribute__ ((packed));
-	unsigned char minute		/* (0-59) */	__attribute__ ((packed));
-	unsigned char second		/* (0-59) */	__attribute__ ((packed));
+	unsigned char hour;		/* (0-23) */
+	unsigned char minute;		/* (0-59) */
+	unsigned char second;		/* (0-59) */
+};
+
+struct StatsOneCpu {
+	unsigned long long per_cpu_idle		__attribute__ ((aligned (16)));
+	unsigned long long per_cpu_iowait		__attribute__ ((aligned (16)));
+	unsigned long long per_cpu_user		__attribute__ ((aligned (16)));
+	unsigned long long per_cpu_nice		__attribute__ ((aligned (16)));
+	unsigned long long per_cpu_system		__attribute__ ((aligned (16)));
+	unsigned long long per_cpu_steal		__attribute__ ((aligned (16)));
+	unsigned long long pad			__attribute__ ((aligned (16)));
+};
+
+
+struct StatsNetDev {
+	unsigned long rx_packets			__attribute__ ((aligned (8)));
+	unsigned long tx_packets			__attribute__ ((aligned (8)));
+	unsigned long rx_bytes			__attribute__ ((aligned (8)));
+	unsigned long tx_bytes			__attribute__ ((aligned (8)));
+	unsigned long rx_compressed			__attribute__ ((aligned (8)));
+	unsigned long tx_compressed			__attribute__ ((aligned (8)));
+	unsigned long multicast			__attribute__ ((aligned (8)));
+	unsigned long collisions			__attribute__ ((aligned (8)));
+	unsigned long rx_errors			__attribute__ ((aligned (8)));
+	unsigned long tx_errors			__attribute__ ((aligned (8)));
+	unsigned long rx_dropped			__attribute__ ((aligned (8)));
+	unsigned long tx_dropped			__attribute__ ((aligned (8)));
+	unsigned long rx_fifo_errors			__attribute__ ((aligned (8)));
+	unsigned long tx_fifo_errors			__attribute__ ((aligned (8)));
+	unsigned long rx_frame_errors		__attribute__ ((aligned (8)));
+	unsigned long tx_carrier_errors		__attribute__ ((aligned (8)));
+	char		 interface[MAX_IFACE_LEN]	__attribute__ ((aligned (8)));
+};
+
+
+struct DiskStats {
+	unsigned long long rd_sect			__attribute__ ((aligned (16)));
+	unsigned long long wr_sect			__attribute__ ((aligned (16)));
+	unsigned long rd_ticks			__attribute__ ((aligned (16)));
+	unsigned long wr_ticks			__attribute__ ((aligned (8)));
+	unsigned long tot_ticks			__attribute__ ((aligned (8)));
+	unsigned long rq_ticks			__attribute__ ((aligned (8)));
+	unsigned long nr_ios				__attribute__ ((aligned (8)));
+	unsigned int  major				__attribute__ ((aligned (8)));
+	unsigned int  minor				__attribute__ ((packed));
+};
+
+
+struct Tstamp {
+	int tm_sec;
+	int tm_min;
+	int tm_hour;
+	int use;
 };
 
 int get_sar_info(SarInfo &sar_info);
+
+}
 
 #endif 	/* _SAR_H */
