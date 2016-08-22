@@ -1,3 +1,5 @@
+
+
 #include "sar.h"
 
 #include <cstdio>
@@ -15,6 +17,136 @@
 
 namespace Sar {
 
+struct FileStats {
+	/* --- LONG LONG --- */
+	/* Machine uptime (multiplied by the # of proc) */
+	unsigned long long uptime			__attribute__ ((aligned (16)));
+	/* Uptime reduced to one processor. Set *only* on SMP machines */
+	unsigned long long uptime0			__attribute__ ((aligned (16)));
+	unsigned long long context_swtch		__attribute__ ((aligned (16)));
+	unsigned long long cpu_user			__attribute__ ((aligned (16)));
+	unsigned long long cpu_nice			__attribute__ ((aligned (16)));
+	unsigned long long cpu_system		__attribute__ ((aligned (16)));
+	unsigned long long cpu_idle			__attribute__ ((aligned (16)));
+	unsigned long long cpu_iowait		__attribute__ ((aligned (16)));
+	unsigned long long cpu_steal			__attribute__ ((aligned (16)));
+	unsigned long long irq_sum			__attribute__ ((aligned (16)));
+	/* --- LONG --- */
+	/* Time stamp (number of seconds since the epoch) */
+	unsigned long ust_time			__attribute__ ((aligned (16)));
+	unsigned long processes			__attribute__ ((aligned (8)));
+	unsigned long pgpgin				__attribute__ ((aligned (8)));
+	unsigned long pgpgout			__attribute__ ((aligned (8)));
+	unsigned long pswpin				__attribute__ ((aligned (8)));
+	unsigned long pswpout			__attribute__ ((aligned (8)));
+	/* Memory stats in kB */
+	unsigned long frmkb				__attribute__ ((aligned (8)));
+	unsigned long bufkb				__attribute__ ((aligned (8)));
+	unsigned long camkb				__attribute__ ((aligned (8)));
+	unsigned long tlmkb				__attribute__ ((aligned (8)));
+	unsigned long frskb				__attribute__ ((aligned (8)));
+	unsigned long tlskb				__attribute__ ((aligned (8)));
+	unsigned long caskb				__attribute__ ((aligned (8)));
+	unsigned long nr_running			__attribute__ ((aligned (8)));
+	unsigned long pgfault			__attribute__ ((aligned (8)));
+	unsigned long pgmajfault			__attribute__ ((aligned (8)));
+	/* --- INT --- */
+	unsigned int  dk_drive			__attribute__ ((aligned (8)));
+	unsigned int  dk_drive_rio			__attribute__ ((packed));
+	unsigned int  dk_drive_wio			__attribute__ ((packed));
+	unsigned int  dk_drive_rblk			__attribute__ ((packed));
+	unsigned int  dk_drive_wblk			__attribute__ ((packed));
+	unsigned int  file_used			__attribute__ ((packed));
+	unsigned int  inode_used			__attribute__ ((packed));
+	unsigned int  super_used			__attribute__ ((packed));
+	unsigned int  super_max			__attribute__ ((packed));
+	unsigned int  dquot_used			__attribute__ ((packed));
+	unsigned int  dquot_max			__attribute__ ((packed));
+	unsigned int  rtsig_queued			__attribute__ ((packed));
+	unsigned int  rtsig_max			__attribute__ ((packed));
+	unsigned int  sock_inuse			__attribute__ ((packed));
+	unsigned int  tcp_inuse			__attribute__ ((packed));
+	unsigned int  udp_inuse			__attribute__ ((packed));
+	unsigned int  raw_inuse			__attribute__ ((packed));
+	unsigned int  frag_inuse			__attribute__ ((packed));
+	unsigned int  dentry_stat			__attribute__ ((packed));
+	unsigned int  load_avg_1			__attribute__ ((packed));
+	unsigned int  load_avg_5			__attribute__ ((packed));
+	unsigned int  load_avg_15			__attribute__ ((packed));
+	unsigned int  nr_threads			__attribute__ ((packed));
+	unsigned int  nfs_rpccnt			__attribute__ ((packed));
+	unsigned int  nfs_rpcretrans			__attribute__ ((packed));
+	unsigned int  nfs_readcnt			__attribute__ ((packed));
+	unsigned int  nfs_writecnt			__attribute__ ((packed));
+	unsigned int  nfs_accesscnt			__attribute__ ((packed));
+	unsigned int  nfs_getattcnt			__attribute__ ((packed));
+	unsigned int  nfsd_rpccnt			__attribute__ ((packed));
+	unsigned int  nfsd_rpcbad			__attribute__ ((packed));
+	unsigned int  nfsd_netcnt			__attribute__ ((packed));
+	unsigned int  nfsd_netudpcnt			__attribute__ ((packed));
+	unsigned int  nfsd_nettcpcnt			__attribute__ ((packed));
+	unsigned int  nfsd_rchits			__attribute__ ((packed));
+	unsigned int  nfsd_rcmisses			__attribute__ ((packed));
+	unsigned int  nfsd_readcnt			__attribute__ ((packed));
+	unsigned int  nfsd_writecnt			__attribute__ ((packed));
+	unsigned int  nfsd_accesscnt			__attribute__ ((packed));
+	unsigned int  nfsd_getattcnt			__attribute__ ((packed));
+	/* --- CHAR --- */
+	/* Record type: R_STATS or R_DUMMY */
+	/* unsigned char record_type; */
+	/*
+	 * Time stamp: hour, minute and second.
+	 * Used to determine TRUE time (immutable, non locale dependent time).
+	 */
+	unsigned char hour;		/* (0-23) */
+	unsigned char minute;		/* (0-59) */
+	unsigned char second;		/* (0-59) */
+};
+
+struct StatsOneCpu {
+	unsigned long long per_cpu_idle		__attribute__ ((aligned (16)));
+	unsigned long long per_cpu_iowait		__attribute__ ((aligned (16)));
+	unsigned long long per_cpu_user		__attribute__ ((aligned (16)));
+	unsigned long long per_cpu_nice		__attribute__ ((aligned (16)));
+	unsigned long long per_cpu_system		__attribute__ ((aligned (16)));
+	unsigned long long per_cpu_steal		__attribute__ ((aligned (16)));
+	unsigned long long pad			__attribute__ ((aligned (16)));
+};
+
+
+struct StatsNetDev {
+	unsigned long rx_packets			__attribute__ ((aligned (8)));
+	unsigned long tx_packets			__attribute__ ((aligned (8)));
+	unsigned long rx_bytes			__attribute__ ((aligned (8)));
+	unsigned long tx_bytes			__attribute__ ((aligned (8)));
+	unsigned long rx_compressed			__attribute__ ((aligned (8)));
+	unsigned long tx_compressed			__attribute__ ((aligned (8)));
+	unsigned long multicast			__attribute__ ((aligned (8)));
+	unsigned long collisions			__attribute__ ((aligned (8)));
+	unsigned long rx_errors			__attribute__ ((aligned (8)));
+	unsigned long tx_errors			__attribute__ ((aligned (8)));
+	unsigned long rx_dropped			__attribute__ ((aligned (8)));
+	unsigned long tx_dropped			__attribute__ ((aligned (8)));
+	unsigned long rx_fifo_errors			__attribute__ ((aligned (8)));
+	unsigned long tx_fifo_errors			__attribute__ ((aligned (8)));
+	unsigned long rx_frame_errors		__attribute__ ((aligned (8)));
+	unsigned long tx_carrier_errors		__attribute__ ((aligned (8)));
+	char		 interface[MAX_IFACE_LEN]	__attribute__ ((aligned (8)));
+};
+
+
+struct DiskStats {
+	unsigned long long rd_sect			__attribute__ ((aligned (16)));
+	unsigned long long wr_sect			__attribute__ ((aligned (16)));
+	unsigned long rd_ticks			__attribute__ ((aligned (16)));
+	unsigned long wr_ticks			__attribute__ ((aligned (8)));
+	unsigned long tot_ticks			__attribute__ ((aligned (8)));
+	unsigned long rq_ticks			__attribute__ ((aligned (8)));
+	unsigned long nr_ios				__attribute__ ((aligned (8)));
+	unsigned int  major				__attribute__ ((aligned (8)));
+	unsigned int  minor				__attribute__ ((packed));
+};
+
 
 static StatsOneCpu stats_one_cpu[2][MAX_CPU_NR];
 static StatsNetDev stats_net_dev[2][MAX_NET_DEV_NR];
@@ -25,6 +157,12 @@ static int g_disk_nr;	/* number of devices in /proc/stat */
 static int g_iface_nr;	/* number of network devices (interfaces) */
 static int g_hz;
 static int g_shift;
+
+/*
+ * kB -> number of pages.
+ * Page size depends on machine architecture (4 kB, 8 kB, 16 kB, 64 kB...)
+ */
+#define PG(k)	((k) >> (g_shift))
 
 /* Get page shift in kB */
 static int get_kb_shift()
@@ -690,7 +828,7 @@ static int read_net_dev_stat(FileStats &file_stats, int curr)
 
 	if (dev < g_iface_nr) {
 		/* Reset unused structures */
-		memset(stats_net_dev[curr] + dev, 0, STATS_NET_DEV_SIZE * (g_iface_nr - dev));
+		memset(stats_net_dev[curr] + dev, 0, sizeof(StatsNetDev) * (g_iface_nr - dev));
 
 		while (dev < g_iface_nr) {
 			/*
@@ -984,32 +1122,32 @@ static int check_iface_reg(StatsNetDev st_net_dev[][MAX_NET_DEV_NR],
 				 * properly calculated if the result is of the same type (i.e.
 				 * unsigned long) as the two values.
 				 */
-				int ovfw = FALSE;
+				bool ovfw = false;
 
 				if ((st_net_dev_i->rx_bytes < st_net_dev_j->rx_bytes) &&
 						(st_net_dev_i->rx_packets > st_net_dev_j->rx_packets) &&
 						(st_net_dev_j->rx_bytes > (~0UL >> 1))) {
-					ovfw = TRUE;
+					ovfw = true;
 				}
 				if ((st_net_dev_i->tx_bytes < st_net_dev_j->tx_bytes) &&
 						(st_net_dev_i->tx_packets > st_net_dev_j->tx_packets) &&
 						(st_net_dev_j->tx_bytes > (~0UL >> 1))) {
-					ovfw = TRUE;
+					ovfw = true;
 				}
 				if ((st_net_dev_i->rx_packets < st_net_dev_j->rx_packets) &&
 						(st_net_dev_i->rx_bytes > st_net_dev_j->rx_bytes) &&
 						(st_net_dev_j->rx_packets > (~0UL >> 1))) {
-					ovfw = TRUE;
+					ovfw = true;
 				}
 				if ((st_net_dev_i->tx_packets < st_net_dev_j->tx_packets) &&
 						(st_net_dev_i->tx_bytes > st_net_dev_j->tx_bytes) &&
 						(st_net_dev_j->tx_packets > (~0UL >> 1))) {
-					ovfw = TRUE;
+					ovfw = true;
 				}
 
 				if (!ovfw) {
 					/* OK: assume here that the device was actually unregistered */
-					memset(st_net_dev_j, 0, STATS_NET_DEV_SIZE);
+					memset(st_net_dev_j, 0, sizeof(StatsNetDev));
 					strcpy(st_net_dev_j->interface, st_net_dev_i->interface);
 				}
 			}
@@ -1022,7 +1160,7 @@ static int check_iface_reg(StatsNetDev st_net_dev[][MAX_NET_DEV_NR],
 	for (index = 0; index < g_iface_nr; index++) {
 		st_net_dev_j = st_net_dev[ref] + index;
 		if (!strcmp(st_net_dev_j->interface, "?")) {
-			memset(st_net_dev_j, 0, STATS_NET_DEV_SIZE);
+			memset(st_net_dev_j, 0, sizeof(StatsNetDev));
 			strcpy(st_net_dev_j->interface, st_net_dev_i->interface);
 			break;
 		}
@@ -1034,7 +1172,7 @@ static int check_iface_reg(StatsNetDev st_net_dev[][MAX_NET_DEV_NR],
 
 	st_net_dev_j = st_net_dev[ref] + index;
 	/* Since the name is not the same, reset all the structure */
-	memset(st_net_dev_j, 0, STATS_NET_DEV_SIZE);
+	memset(st_net_dev_j, 0, sizeof(StatsNetDev));
 	strcpy(st_net_dev_j->interface, st_net_dev_i->interface);
 
 	return  index;
@@ -1068,7 +1206,7 @@ static int check_disk_reg(DiskStats st_disk[][MAX_DISK_NR],
 					(st_disk_i->rd_sect < st_disk_j->rd_sect) ||
 					(st_disk_i->wr_sect < st_disk_j->wr_sect)) {
 
-				memset(st_disk_j, 0, DISK_STATS_SIZE);
+				memset(st_disk_j, 0, sizeof(DiskStats));
 				st_disk_j->major = st_disk_i->major;
 				st_disk_j->minor = st_disk_i->minor;
 			}
@@ -1081,7 +1219,7 @@ static int check_disk_reg(DiskStats st_disk[][MAX_DISK_NR],
 	for (index = 0; index < g_disk_nr; index++) {
 		st_disk_j = st_disk[ref] + index;
 		if (!(st_disk_j->major + st_disk_j->minor)) {
-			memset(st_disk_j, 0, DISK_STATS_SIZE);
+			memset(st_disk_j, 0, sizeof(DiskStats));
 			st_disk_j->major = st_disk_i->major;
 			st_disk_j->minor = st_disk_i->minor;
 			break;
@@ -1094,7 +1232,7 @@ static int check_disk_reg(DiskStats st_disk[][MAX_DISK_NR],
 
 	st_disk_j = st_disk[ref] + index;
 	/* Since the device is not the same, reset all the structure */
-	memset(st_disk_j, 0, DISK_STATS_SIZE);
+	memset(st_disk_j, 0, sizeof(DiskStats));
 	st_disk_j->major = st_disk_i->major;
 	st_disk_j->minor = st_disk_i->minor;
 
@@ -1332,3 +1470,7 @@ int main(int argc, char *argv[])
 	return 0;
 }
 //#endif
+
+
+#undef PG
+
