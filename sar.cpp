@@ -9,6 +9,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <net/if.h>
+#include <poll.h>
 
 #include <algorithm>
 
@@ -293,7 +294,7 @@ static int get_disk_io_nr()
 	int dsk = 0;
 	while (fgets(line, 8192, fp) != NULL) {
 		if (!strncmp(line, "disk_io: ", 9)) {
-			for (int pos = 9; pos < strlen(line) - 1; 
+			for (int pos = 9; pos < (int)strlen(line) - 1; 
 					pos +=strcspn(line + pos, " ") + 1)
 				dsk++;
 		}
@@ -334,9 +335,7 @@ static int read_proc_stat(FileStats &file_stats, int curr)
 {
 	FILE *fp;
 	if ((fp = fopen(STAT, "r")) == NULL) {
-		/* fprintf(stderr, _("Cannot open %s: %s\n"), STAT, strerror(errno)); */
 		/* exit(2); */
-		printf("read proc stat error.\n");
 		return -1;
 	}
 
@@ -454,7 +453,6 @@ static int read_proc_meminfo(FileStats &file_stats)
 {
 	FILE *fp;
 	if ((fp = fopen(MEMINFO, "r")) == NULL) {
-		printf("read proc meminfo error.\n");
 		return -1;
 	}
 
@@ -501,7 +499,6 @@ static int read_proc_loadavg(FileStats &file_stats)
 {
 	FILE *fp;
 	if ((fp = fopen(LOADAVG, "r")) == NULL) {
-		printf("read proc loadavg error.\n");
 		return -1;
 	}
 
@@ -531,7 +528,6 @@ static int read_proc_vmstat(FileStats &file_stats)
 {
 	FILE *fp;
 	if ((fp = fopen(VMSTAT, "r")) == NULL) {
-		printf("read proc vmstat error.\n");
 		return -1;
 	}
 
@@ -653,7 +649,6 @@ static int read_net_dev_stat(FileStats &file_stats, int curr)
 {
 	FILE *fp;
 	if ((fp = fopen(NET_DEV, "r")) == NULL) {
-		printf("read net dev stat error.\n");
 		return -1;
 	}
 
@@ -663,7 +658,7 @@ static int read_net_dev_stat(FileStats &file_stats, int curr)
 	while ((fgets(line, 256, fp) != NULL) && (dev < g_iface_nr)) {
 		int pos = strcspn(line, ":");
 		StatsNetDev *stats_net_dev_i = NULL;
-		if (pos < strlen(line)) {
+		if (pos < (int)strlen(line)) {
 			stats_net_dev_i = stats_net_dev[curr] + dev;
 			strncpy(iface, line, std::min(pos, MAX_IFACE_LEN - 1));
 			iface[std::min(pos, MAX_IFACE_LEN - 1)] = '\0';
@@ -715,7 +710,6 @@ static int read_net_sock_stat(FileStats &file_stats)
 {
 	FILE *fp;
 	if ((fp = fopen(NET_SOCKSTAT, "r")) == NULL) {
-		printf("read net sock stat error.\n");
 		return -1;
 	}
 
@@ -752,7 +746,6 @@ static int read_net_nfs_stat(FileStats &file_stats)
 {
 	FILE *fp;
 	if ((fp = fopen(NET_RPC_NFS, "r")) == NULL) {
-		printf("read net nfs stat error.\n");
 		return -1;
 	}
 
@@ -778,7 +771,6 @@ static int read_net_nfsd_stat(FileStats &file_stats)
 {
 	FILE *fp;
 	if ((fp = fopen(NET_RPC_NFSD, "r")) == NULL) {
-		printf("read net nfsd stat error.\n");
 		return -1;
 	}
 
@@ -1124,7 +1116,6 @@ static int init()
 
 	if (g_cpu_nr > MAX_CPU_NR || g_disk_nr > MAX_DISK_NR || 
 		g_iface_nr > MAX_IFACE_LEN || g_hz <= 0 || g_shift < 0) {
-		printf("g_shift error.\n");
 		return -1;
 	}
 	return 0;
@@ -1190,7 +1181,7 @@ int get_sar_info(SarInfo &sar_info) {
 	int curr = 1, prev = 0;
 
 	ret += read_stats(file_stats[prev], prev);
-	sleep(1);
+	poll(NULL, 0, 500);
 	ret += read_stats(file_stats[curr], curr);
 
 	/* all data is collected */
@@ -1200,45 +1191,44 @@ int get_sar_info(SarInfo &sar_info) {
 
 	get_itv_value(f_curr, f_prev, g_cpu_nr, &itv, &g_itv);
 	if (itv == 0 || g_itv == 0) {
-		printf("itv or g_itv error.\n");
 		return -1;
 	}
 
 	/* number of context switches per second */
-	double nr_processes = ll_s_value(f_prev.context_swtch, 
-			f_curr.context_swtch, itv);
+	//double nr_processes = ll_s_value(f_prev.context_swtch, 
+			//f_curr.context_swtch, itv);
 
 
 	/* CPU usage */
-	double cpu_user = ll_sp_value(f_prev.cpu_user, f_curr.cpu_user, g_itv);
-	double cpu_nice = ll_sp_value(f_prev.cpu_nice, f_curr.cpu_nice, g_itv);
-	double cpu_system =	ll_sp_value(f_prev.cpu_system, f_curr.cpu_system, g_itv);
-	double cpu_iowait = ll_sp_value(f_prev.cpu_iowait, f_curr.cpu_iowait, g_itv);
-	double cpu_steal =	ll_sp_value(f_prev.cpu_steal, f_curr.cpu_steal, g_itv);
-	double cpu_idle = f_curr.cpu_idle < f_prev.cpu_idle ?  0.0 :
-					ll_sp_value(f_prev.cpu_idle, f_curr.cpu_idle, g_itv);
+	//double cpu_user = ll_sp_value(f_prev.cpu_user, f_curr.cpu_user, g_itv);
+	//double cpu_nice = ll_sp_value(f_prev.cpu_nice, f_curr.cpu_nice, g_itv);
+	//double cpu_system =	ll_sp_value(f_prev.cpu_system, f_curr.cpu_system, g_itv);
+	//double cpu_iowait = ll_sp_value(f_prev.cpu_iowait, f_curr.cpu_iowait, g_itv);
+	//double cpu_steal =	ll_sp_value(f_prev.cpu_steal, f_curr.cpu_steal, g_itv);
+	//double cpu_idle = f_curr.cpu_idle < f_prev.cpu_idle ?  0.0 :
+					//ll_sp_value(f_prev.cpu_idle, f_curr.cpu_idle, g_itv);
 
 	/* paging statistics */
-	double pgpgin = s_value(f_prev.pgpgin, f_curr.pgpgin, itv);
-	double pgpgout = s_value(f_prev.pgpgout, f_curr.pgpgout, itv);
-	double pgfault = s_value(f_prev.pgfault, f_curr.pgfault, itv);
-	double pgmajfault =s_value(f_prev.pgmajfault, f_curr.pgmajfault, itv);
+	//double pgpgin = s_value(f_prev.pgpgin, f_curr.pgpgin, itv);
+	//double pgpgout = s_value(f_prev.pgpgout, f_curr.pgpgout, itv);
+	//double pgfault = s_value(f_prev.pgfault, f_curr.pgfault, itv);
+	//double pgmajfault =s_value(f_prev.pgmajfault, f_curr.pgmajfault, itv);
 
 	/* number of swap pages brought in and out */
-	double pswpin = s_value(f_prev.pswpin, f_curr.pswpin, itv);
-	double pswpout = s_value(f_prev.pswpout, f_curr.pswpout, itv);
+	//double pswpin = s_value(f_prev.pswpin, f_curr.pswpin, itv);
+	//double pswpout = s_value(f_prev.pswpout, f_curr.pswpout, itv);
 
 	/* I/O stats (no distinction made between disks) */
-	double tps = s_value(f_prev.dk_drive, f_curr.dk_drive, itv);
-	double rtps = s_value(f_prev.dk_drive_rio, f_curr.dk_drive_rio, itv);
-	double wtps = s_value(f_prev.dk_drive_wio, f_curr.dk_drive_wio, itv);
-	double bread = s_value(f_prev.dk_drive_rblk, f_curr.dk_drive_rblk, itv);
-	double bwrtn = s_value(f_prev.dk_drive_wblk, f_curr.dk_drive_wblk, itv);
+	//double tps = s_value(f_prev.dk_drive, f_curr.dk_drive, itv);
+	//double rtps = s_value(f_prev.dk_drive_rio, f_curr.dk_drive_rio, itv);
+	//double wtps = s_value(f_prev.dk_drive_wio, f_curr.dk_drive_wio, itv);
+	//double bread = s_value(f_prev.dk_drive_rblk, f_curr.dk_drive_rblk, itv);
+	//double bwrtn = s_value(f_prev.dk_drive_wblk, f_curr.dk_drive_wblk, itv);
 
 	/* memory stats */
-	double frmpg = s_value((double) PG(f_prev.frmkb), (double) PG(f_curr.frmkb), itv);
-	double bufpg = s_value((double) PG(f_prev.bufkb), (double) PG(f_curr.bufkb), itv);
-	double campg = s_value((double) PG(f_prev.camkb), (double) PG(f_curr.camkb), itv);
+	//double frmpg = s_value((double) PG(f_prev.frmkb), (double) PG(f_curr.frmkb), itv);
+	//double bufpg = s_value((double) PG(f_prev.bufkb), (double) PG(f_curr.bufkb), itv);
+	//double campg = s_value((double) PG(f_prev.camkb), (double) PG(f_curr.camkb), itv);
 
 	/* network interface statistics */
 	StatsNetDev *sndi = stats_net_dev[curr], *sndj;
@@ -1314,22 +1304,31 @@ int get_sar_info(SarInfo &sar_info) {
 		++nr_sar_disk_info;
 	}
 
-
 	return ret;
 }
 
 }
 
-#ifdef SAR_UNIT_TEST
+//#ifdef SAR_UNIT_TEST
 int main(int argc, char *argv[])
 {
 	Sar::SarInfo si;
 
 	int ret;
 	if ((ret = Sar::get_sar_info(si)) < 0) {
-		printf("error: %d\n", ret);
+		//printf("error: %d\n", ret);
 	}
+
+	for (int i = 0; i < si.nr_sar_interface_info; ++i) {
+		printf("%s: ", si.sar_interface_info[i].interface);
+		printf("%f %f %f %f\n\n",
+		si.sar_interface_info[i].rxpck,
+		si.sar_interface_info[i].txpck,
+		si.sar_interface_info[i].rxbyt,
+		si.sar_interface_info[i].txbyt);
+	}
+
 	
 	return 0;
 }
-#endif
+//#endif
