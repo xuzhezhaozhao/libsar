@@ -1,6 +1,7 @@
 
 
 #include "sar.h"
+#include "ioconf.h"
 
 #include <cstdio>
 #include <ctime>
@@ -15,7 +16,57 @@
 
 #include <algorithm>
 
-namespace Sar {
+/* Get IFNAMSIZ */
+#ifndef IFNAMSIZ
+#define IFNAMSIZ	16
+#endif
+
+/* Maximum length of network interface name */
+const int MAX_IFACE_LEN = IFNAMSIZ;
+
+/* Maximum length of disk name */
+const int MAX_DISK_LEN = 16;
+
+const int MAX_CPU_NR = 128;
+const int MAX_NET_DEV_NR = 16;
+const int MAX_DISK_NR = 64;
+
+const int MAX_PF_NAME = 1024;
+
+const int NR_IFACE_PREALLOC = 2;
+const int NR_DEV_PREALLOC = 4;
+const int NR_DISK_PREALLOC = 3;
+
+/* Files */
+const char * const STAT = "/proc/stat";
+const char * const PPARTITIONS = "/proc/partitions";
+const char * const DISKSTATS = "/proc/diskstats";
+const char * const INTERRUPTS = "/proc/interrupts";
+const char * const SYSFS_BLOCK = "/sys/block";
+const char * const SYSFS_DEVCPU = "/sys/devices/system/cpu";
+const char * const S_STAT = "stat";
+
+const char * const PROC = "/proc";
+const char * const PSTAT = "stat";
+const char * const MEMINFO = "/proc/meminfo";
+const char * const PID_STAT = "/proc/%ld/stat";
+const char * const SERIAL = "/proc/tty/driver/serial";
+const char * const FDENTRY_STATE = "/proc/sys/fs/dentry-state";
+const char * const FFILE_NR	= "/proc/sys/fs/file-nr";
+const char * const FINODE_STATE = "/proc/sys/fs/inode-state";
+const char * const FDQUOT_NR = "/proc/sys/fs/dquot-nr";
+const char * const FDQUOT_MAX = "/proc/sys/fs/dquot-max";
+const char * const FSUPER_NR = "/proc/sys/fs/super-nr";
+const char * const FSUPER_MAX = "/proc/sys/fs/super-max";
+const char * const FRTSIG_NR = "/proc/sys/kernel/rtsig-nr";
+const char * const FRTSIG_MAX = "/proc/sys/kernel/rtsig-max";
+const char * const NET_DEV = "/proc/net/dev";
+const char * const NET_SOCKSTAT = "/proc/net/sockstat";
+const char * const NET_RPC_NFS = "/proc/net/rpc/nfs";
+const char * const NET_RPC_NFSD = "/proc/net/rpc/nfsd";
+const char * const SADC ="sadc";
+const char * const LOADAVG = "/proc/loadavg";
+const char * const VMSTAT = "/proc/vmstat";
 
 struct FileStats {
 	/* --- LONG LONG --- */
@@ -412,8 +463,41 @@ static int get_diskstats_dev_nr(int count_part, int only_used_dev)
 	return dev;
 }
 
-/* TODO */
-/* int get_ppartitions_dev_nr(int count_part) */
+/*
+ * Find number of devices and partitions that have statistics in
+ * /proc/partitions.
+ */
+int get_ppartitions_dev_nr(int count_part)
+{
+    FILE *fp;
+    char line[256];
+    int dev = 0;
+    unsigned int major, minor, tmp;
+
+    if ((fp = fopen(PPARTITIONS, "r")) == NULL) {
+        return 0;
+    }
+
+    while (fgets(line, 256, fp) != NULL) {
+        if (sscanf(line, "%u %u %*u %*s %u", &major, &minor, &tmp) == 3) {
+            /*
+             * We have just read a line from /proc/partitions containing stats
+             * for a device or a partition (i.e. this is not a fake line:
+             * header, blank line,... or a line without stats!)
+             */
+            if (!count_part && !ioc_iswhole(major, minor)) {
+                //[> This was a partition, and we don't want to count them <]
+                //continue;
+            }
+            dev++;
+        }
+    }
+
+    fclose(fp);
+
+    return dev;
+}
+
 
 /*
  * Find number of disk entries that are registered on the
@@ -443,6 +527,27 @@ static int get_disk_io_nr()
 	return dsk;
 }
 
+static int get_disk_nr()
+{
+    int disk_nr = 0;
+    /*
+     * Get number of devices in /proc/{diskstats,partitions}
+     * or number of disk_io entries in /proc/stat.
+     * Alwyays done, since disk stats must be read at least for sar -b
+     * if not for sar -d.
+     */
+    if ((disk_nr = get_diskstats_dev_nr(0, 1)) > 0) {
+        disk_nr += NR_DISK_PREALLOC;
+    }
+    else if ((disk_nr = get_ppartitions_dev_nr(0)) > 0) {
+        disk_nr += NR_DISK_PREALLOC;
+    }
+    else if ((disk_nr = get_disk_io_nr()) > 0) {
+        disk_nr += NR_DISK_PREALLOC;
+    }
+    return disk_nr;
+}
+
 
 /*
  * Find number of interfaces (network devices) that are in /proc/net/dev
@@ -467,6 +572,36 @@ int get_net_dev(void)
 
 	return (dev + NR_IFACE_PREALLOC);
 }
+
+
+
+
+/*
+ ***************************************************************************
+ * Get device real name if possible.
+ * Warning: This routine may return a bad name on 2.4 kernels where
+ * disk activities are read from /proc/stat.
+ ***************************************************************************
+ */
+char *get_devname(unsigned int major, unsigned int minor, int pretty)
+{
+    static char buf[MAX_DISK_LEN] = {0};
+    char *name;
+
+    snprintf(buf, MAX_DISK_LEN, "dev%d-%d", major, minor);
+
+
+    if (!pretty) {
+        return (buf);
+    }
+
+    if ((name = ioc_name(major, minor)) == NULL) {
+        return (buf);
+    }
+
+    return (name);
+}
+
 
 /* Read stats from /proc/stat */
 static int read_proc_stat(FileStats &file_stats, int curr)
@@ -1247,8 +1382,9 @@ static int init()
 	memset(disk_stats, 0, sizeof(disk_stats));
 
 	g_cpu_nr = get_cpu_nr();
-	g_disk_nr = get_diskstats_dev_nr(0, 1) + NR_DISK_PREALLOC;
+	g_disk_nr = get_disk_nr();
 	g_iface_nr = get_net_dev();
+
 	g_hz = get_HZ();
 	g_shift = get_kb_shift();
 
@@ -1259,14 +1395,14 @@ static int init()
 	return 0;
 }
 
+/* TODO */
 template <typename T, typename U, typename Q>
-static double s_value(T m, U n, Q p)
+double s_value(T m, U n, Q p)
 {
 	return (((double) ((n) - (m))) / (p) * g_hz);
 }
-
 template <typename T, typename U, typename Q>
-static double sp_value(T m, U n, Q p)
+double sp_value(T m, U n, Q p)
 {
 	return (((double) ((n) - (m))) / (p) * 100);
 }
@@ -1333,82 +1469,128 @@ int get_sar_info(SarInfo &sar_info) {
 	}
 
 	/* number of context switches per second */
-	//double nr_processes = ll_s_value(f_prev.context_swtch, 
-			//f_curr.context_swtch, itv);
+	double nr_processes = ll_s_value(f_prev.context_swtch, 
+			f_curr.context_swtch, itv);
+    sar_info.set_nr_processes( nr_processes );
+
 
 
 	/* CPU usage */
-	//double cpu_user = ll_sp_value(f_prev.cpu_user, f_curr.cpu_user, g_itv);
-	//double cpu_nice = ll_sp_value(f_prev.cpu_nice, f_curr.cpu_nice, g_itv);
-	//double cpu_system =	ll_sp_value(f_prev.cpu_system, f_curr.cpu_system, g_itv);
-	//double cpu_iowait = ll_sp_value(f_prev.cpu_iowait, f_curr.cpu_iowait, g_itv);
-	//double cpu_steal =	ll_sp_value(f_prev.cpu_steal, f_curr.cpu_steal, g_itv);
-	//double cpu_idle = f_curr.cpu_idle < f_prev.cpu_idle ?  0.0 :
-					//ll_sp_value(f_prev.cpu_idle, f_curr.cpu_idle, g_itv);
+	double cpu_user = ll_sp_value(f_prev.cpu_user, f_curr.cpu_user, g_itv);
+    sar_info.set_cpu_user( cpu_user );
+	double cpu_nice = ll_sp_value(f_prev.cpu_nice, f_curr.cpu_nice, g_itv);
+    sar_info.set_cpu_nice( cpu_nice );
+	double cpu_system =	ll_sp_value(f_prev.cpu_system, f_curr.cpu_system, g_itv);
+    sar_info.set_cpu_system( cpu_system );
+	double cpu_iowait = ll_sp_value(f_prev.cpu_iowait, f_curr.cpu_iowait, g_itv);
+    sar_info.set_cpu_iowait( cpu_iowait );
+	double cpu_steal =	ll_sp_value(f_prev.cpu_steal, f_curr.cpu_steal, g_itv);
+    sar_info.set_cpu_steal( cpu_steal );
+	double cpu_idle = f_curr.cpu_idle < f_prev.cpu_idle ?  0.0 :
+					ll_sp_value(f_prev.cpu_idle, f_curr.cpu_idle, g_itv);
+    sar_info.set_cpu_idle( cpu_idle );
 
 	/* paging statistics */
-	//double pgpgin = s_value(f_prev.pgpgin, f_curr.pgpgin, itv);
-	//double pgpgout = s_value(f_prev.pgpgout, f_curr.pgpgout, itv);
-	//double pgfault = s_value(f_prev.pgfault, f_curr.pgfault, itv);
-	//double pgmajfault =s_value(f_prev.pgmajfault, f_curr.pgmajfault, itv);
+	double pgpgin = s_value(f_prev.pgpgin, f_curr.pgpgin, itv);
+    sar_info.set_pgpgin( pgpgin );
+	double pgpgout = s_value(f_prev.pgpgout, f_curr.pgpgout, itv);
+    sar_info.set_pgpgout( pgpgout );
+	double pgfault = s_value(f_prev.pgfault, f_curr.pgfault, itv);
+    sar_info.set_pgfault( pgfault );
+	double pgmajfault = s_value(f_prev.pgmajfault, f_curr.pgmajfault, itv);
+    sar_info.set_pgmajfault( pgmajfault );
 
 	/* number of swap pages brought in and out */
-	//double pswpin = s_value(f_prev.pswpin, f_curr.pswpin, itv);
-	//double pswpout = s_value(f_prev.pswpout, f_curr.pswpout, itv);
+	double pswpin = s_value(f_prev.pswpin, f_curr.pswpin, itv);
+    sar_info.set_pswpin( pswpin );
+	double pswpout = s_value(f_prev.pswpout, f_curr.pswpout, itv);
+    sar_info.set_pswpout( pswpout );
 
 	/* I/O stats (no distinction made between disks) */
-	//double tps = s_value(f_prev.dk_drive, f_curr.dk_drive, itv);
-	//double rtps = s_value(f_prev.dk_drive_rio, f_curr.dk_drive_rio, itv);
-	//double wtps = s_value(f_prev.dk_drive_wio, f_curr.dk_drive_wio, itv);
-	//double bread = s_value(f_prev.dk_drive_rblk, f_curr.dk_drive_rblk, itv);
-	//double bwrtn = s_value(f_prev.dk_drive_wblk, f_curr.dk_drive_wblk, itv);
+	double tps = s_value(f_prev.dk_drive, f_curr.dk_drive, itv);
+    sar_info.set_tps( tps );
+	double rtps = s_value(f_prev.dk_drive_rio, f_curr.dk_drive_rio, itv);
+    sar_info.set_rtps( rtps );
+	double wtps = s_value(f_prev.dk_drive_wio, f_curr.dk_drive_wio, itv);
+    sar_info.set_wtps( wtps );
+	double bread = s_value(f_prev.dk_drive_rblk, f_curr.dk_drive_rblk, itv);
+    sar_info.set_bread( bread );
+	double bwrtn = s_value(f_prev.dk_drive_wblk, f_curr.dk_drive_wblk, itv);
+    sar_info.set_bwrtn( bwrtn );
 
 	/* memory stats */
-	//double frmpg = s_value((double) PG(f_prev.frmkb), (double) PG(f_curr.frmkb), itv);
-	//double bufpg = s_value((double) PG(f_prev.bufkb), (double) PG(f_curr.bufkb), itv);
-	//double campg = s_value((double) PG(f_prev.camkb), (double) PG(f_curr.camkb), itv);
+	double frmpg = s_value((double) PG(f_prev.frmkb), (double) PG(f_curr.frmkb), itv);
+    sar_info.set_frmpg( frmpg );
+	double bufpg = s_value((double) PG(f_prev.bufkb), (double) PG(f_curr.bufkb), itv);
+    sar_info.set_bufpg( bufpg );
+	double campg = s_value((double) PG(f_prev.camkb), (double) PG(f_curr.camkb), itv);
+    sar_info.set_campg( campg );
 
 	/* network interface statistics */
+    double rxpck = 0;
+    double txpck = 0;
+    double rxbyt = 0;
+    double txbyt = 0;
+    double rxcmp = 0;
+    double txcmp = 0;
+    double rxmcst = 0;
+
+    double rxerr = 0;
+    double txerr = 0;
+    double coll = 0;
+    double rxdrop = 0;
+    double txdrop = 0;
+    double txcarr = 0;
+    double rxfram = 0;
+    double rxfifo = 0;
+    double txfifo = 0;
 	StatsNetDev *sndi = stats_net_dev[curr], *sndj;
-	sar_info.nr_sar_interface_info = 0;
 	for (int i = 0; i < g_iface_nr; ++i, ++sndi) {
 		if (!strcmp(sndi->interface, "?")) {
 			continue;
 		}
 		int j = check_iface_reg(stats_net_dev, curr, prev, i);
 		sndj = stats_net_dev[prev] + j;
-		int &nr_sar_interface_info = sar_info.nr_sar_interface_info;
-		SarInterfaceInfo &sar_interface_info = sar_info.sar_interface_info[nr_sar_interface_info];
-		strncpy(sar_interface_info.interface,
-		sndi->interface, MAX_IFACE_LEN-1);
-		sar_interface_info.interface[MAX_IFACE_LEN-1] = '\0';
-		sar_interface_info.rxpck = s_value(sndj->rx_packets, sndi->rx_packets, itv);
-		sar_interface_info.txpck = s_value(sndj->tx_packets, sndi->tx_packets, itv);
-		sar_interface_info.rxbyt = s_value(sndj->rx_bytes, sndi->rx_bytes, itv);
-		sar_interface_info.txbyt = s_value(sndj->tx_bytes, sndi->tx_bytes, itv);
-		sar_interface_info.rxcmp = s_value(sndj->rx_compressed, sndi->rx_compressed, itv);
-		sar_interface_info.txcmp = s_value(sndj->tx_compressed, sndi->tx_compressed, itv);
-		sar_interface_info.rxmcst = s_value(sndj->multicast, sndi->multicast, itv);
+		rxpck += s_value(sndj->rx_packets, sndi->rx_packets, itv);
+		txpck += s_value(sndj->tx_packets, sndi->tx_packets, itv);
+		rxbyt += s_value(sndj->rx_bytes, sndi->rx_bytes, itv);
+		txbyt += s_value(sndj->tx_bytes, sndi->tx_bytes, itv);
+		rxcmp += s_value(sndj->rx_compressed, sndi->rx_compressed, itv);
+		txcmp += s_value(sndj->tx_compressed, sndi->tx_compressed, itv);
+		rxmcst += s_value(sndj->multicast, sndi->multicast, itv);
 
 		/* network interface statistics (errors) */
-		sar_interface_info.rxerr = s_value(sndj->rx_errors, sndi->rx_errors, itv);
-		sar_interface_info.txerr = s_value(sndj->tx_errors, sndi->tx_errors, itv);
-		sar_interface_info.coll = s_value(sndj->collisions, sndi->collisions, itv);
-		sar_interface_info.rxdrop = s_value(sndj->rx_dropped, sndi->rx_dropped, itv);
-		sar_interface_info.txdrop = s_value(sndj->tx_dropped, sndi->tx_dropped, itv);
-		sar_interface_info.txcarr = s_value(sndj->tx_carrier_errors, sndi->tx_carrier_errors, itv);
-		sar_interface_info.rxfram = s_value(sndj->rx_frame_errors, sndi->rx_frame_errors, itv);
-		sar_interface_info.rxfifo = s_value(sndj->rx_fifo_errors, sndi->rx_fifo_errors, itv);
-		sar_interface_info.txfifo = s_value(sndj->tx_fifo_errors, sndi->tx_fifo_errors, itv);
-
-		++nr_sar_interface_info;
+		rxerr += s_value(sndj->rx_errors, sndi->rx_errors, itv);
+		txerr += s_value(sndj->tx_errors, sndi->tx_errors, itv);
+		coll += s_value(sndj->collisions, sndi->collisions, itv);
+		rxdrop += s_value(sndj->rx_dropped, sndi->rx_dropped, itv);
+		txdrop += s_value(sndj->tx_dropped, sndi->tx_dropped, itv);
+		txcarr += s_value(sndj->tx_carrier_errors, sndi->tx_carrier_errors, itv);
+		rxfram += s_value(sndj->rx_frame_errors, sndi->rx_frame_errors, itv);
+		rxfifo += s_value(sndj->rx_fifo_errors, sndi->rx_fifo_errors, itv);
+		txfifo += s_value(sndj->tx_fifo_errors, sndi->tx_fifo_errors, itv);
 	}
+    sar_info.set_rxpck( rxpck );
+    sar_info.set_txpck( txpck );
+    sar_info.set_rxbyt( rxbyt );
+    sar_info.set_txbyt( txbyt );
+    sar_info.set_rxcmp( rxcmp );
+    sar_info.set_txcmp( txcmp );
+    sar_info.set_rxmcst( rxmcst );
+
+    sar_info.set_rxerr( rxerr );
+    sar_info.set_txerr( txerr );
+    sar_info.set_coll( coll );
+    sar_info.set_rxdrop( rxdrop );
+    sar_info.set_txdrop( txdrop );
+    sar_info.set_txcarr( txcarr );
+    sar_info.set_rxfram( rxfram );
+    sar_info.set_rxfifo( rxfifo );
+    sar_info.set_txfifo( txfifo );
 
 	/* disk statistics */
 	DiskStats *sdi = disk_stats[curr], *sdj;
-	sar_info.nr_sar_disk_info = 0;
 	for (int i = 0; i < g_disk_nr; i++, ++sdi) {
-		double tput, util, await, svctm, arqsz;
 		if (!(sdi->major + sdi->minor)) {
 			continue;
 		}
@@ -1416,55 +1598,61 @@ int get_sar_info(SarInfo &sar_info) {
 
 		sdj = disk_stats[prev] + j;
 
-		tput = ((double) (sdi->nr_ios - sdj->nr_ios)) * g_hz / itv;
-		util = s_value(sdj->tot_ticks, sdi->tot_ticks, itv);
-		svctm = tput ? util / tput : 0.0;
-		await = (sdi->nr_ios - sdj->nr_ios) ?
+		double tput = ((double) (sdi->nr_ios - sdj->nr_ios)) * g_hz / itv;
+		double util = s_value(sdj->tot_ticks, sdi->tot_ticks, itv);
+		double svctm = tput ? util / tput : 0.0;
+		double await = (sdi->nr_ios - sdj->nr_ios) ?
 			((sdi->rd_ticks - sdj->rd_ticks) + (sdi->wr_ticks - sdj->wr_ticks)) /
 			((double) (sdi->nr_ios - sdj->nr_ios)) : 0.0;
-		arqsz  = (sdi->nr_ios - sdj->nr_ios) ?
+		double arqsz  = (sdi->nr_ios - sdj->nr_ios) ?
 			((sdi->rd_sect - sdj->rd_sect) + (sdi->wr_sect - sdj->wr_sect)) /
 			((double) (sdi->nr_ios - sdj->nr_ios)) : 0.0;
 
-		int &nr_sar_disk_info = sar_info.nr_sar_disk_info;
-		SarDiskInfo &sar_disk_info = sar_info.sar_disk_info[nr_sar_disk_info];
 
-		sar_disk_info.tps = s_value(sdj->nr_ios, sdi->nr_ios,  itv);
-		sar_disk_info.rd_sec = ll_s_value(sdj->rd_sect, sdi->rd_sect, itv);
-		sar_disk_info.wr_sec = ll_s_value(sdj->wr_sect, sdi->wr_sect, itv);
+		double tps = s_value(sdj->nr_ios, sdi->nr_ios,  itv);
+		double rd_sec = ll_s_value(sdj->rd_sect, sdi->rd_sect, itv);
+		double wr_sec = ll_s_value(sdj->wr_sect, sdi->wr_sect, itv);
 		/* See iostat for explanations */
-		sar_disk_info.avgrq_sz = arqsz;
-		sar_disk_info.avgqu_sz = s_value(sdj->rq_ticks, sdi->rq_ticks, itv) / 1000.0;
-		sar_disk_info.await = await;
-		sar_disk_info.svctm = svctm;
-		sar_disk_info.util = util / 10.0;
+		double avgrq_sz = arqsz;
+		double avgqu_sz = s_value(sdj->rq_ticks, sdi->rq_ticks, itv) / 1000.0;
+		/* await = await; */
+		/* svctm = svctm; */
+		util = util / 10.0;
 
-		++nr_sar_disk_info;
+		char * dev_name = get_devname(sdi->major, sdi->minor, 1);
+
+        ::SarInfo_SarDiskInfo* sar_disk_info = sar_info.add_sar_disk_info();
+        sar_disk_info->set_tps( tps );
+        sar_disk_info->set_rd_sec( rd_sec );
+        sar_disk_info->set_wr_sec( wr_sec );
+        sar_disk_info->set_avgrq_sz( avgrq_sz );
+        sar_disk_info->set_avgqu_sz( avgqu_sz );
+        sar_disk_info->set_await( await );
+        sar_disk_info->set_svctm( svctm );
+        sar_disk_info->set_util( util );
+        if (!dev_name) {
+            sar_disk_info->set_dev_name( dev_name );
+        }
 	}
 
 	return ret;
 }
 
-}
-
 //#ifdef SAR_UNIT_TEST
 int main(int argc, char *argv[])
 {
-	Sar::SarInfo si;
+	SarInfo si;
 
 	int ret;
-	if ((ret = Sar::get_sar_info(si)) < 0) {
+	if ((ret = get_sar_info(si)) < 0) {
 		//printf("error: %d\n", ret);
 	}
 
-	for (int i = 0; i < si.nr_sar_interface_info; ++i) {
-		printf("%s: ", si.sar_interface_info[i].interface);
-		printf("%f %f %f %f\n\n",
-		si.sar_interface_info[i].rxpck,
-		si.sar_interface_info[i].txpck,
-		si.sar_interface_info[i].rxbyt,
-		si.sar_interface_info[i].txbyt);
-	}
+    printf("%f %f %f %f\n\n",
+            si.rxpck(),
+            si.txpck(),
+            si.rxbyt(),
+            si.txbyt());
 
 	
 	return 0;

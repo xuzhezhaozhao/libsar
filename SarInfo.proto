@@ -1,0 +1,68 @@
+message SarInfo {
+	/* network interface statistics */
+	optional double rxpck = 1;
+	optional double txpck = 2;
+	optional double rxbyt = 3;
+	optional double txbyt = 4;
+	optional double rxcmp = 5;
+	optional double txcmp = 6;
+	optional double rxmcst = 7;
+
+	/* network interface statistics (errors) */
+	optional double rxerr = 8;
+	optional double txerr = 9;
+	optional double coll = 10;
+	optional double rxdrop = 11;
+	optional double txdrop = 12;
+	optional double txcarr = 13;
+	optional double rxfram = 14;
+	optional double rxfifo = 15;
+	optional double txfifo = 16;
+
+	/* number of context switches per second */
+    optional double nr_processes = 17;
+
+	/* CPU usage */
+    optional double cpu_user = 18;
+    optional double cpu_nice = 19;
+    optional double cpu_system = 20;
+    optional double cpu_iowait = 21;
+    optional double cpu_steal = 22;
+    optional double cpu_idle = 23;
+
+	/* paging statistics */
+    optional double pgpgin = 24;
+    optional double pgpgout = 25;
+    optional double pgfault = 26;
+    optional double pgmajfault = 27;
+
+	/* number of swap pages brought in and out */
+    optional double pswpin = 28;
+    optional double pswpout = 29;
+
+	/* I/O stats (no distinction made between disks) */
+    optional double tps = 30;
+    optional double rtps = 31;
+    optional double wtps = 32;
+    optional double bread = 33;
+    optional double bwrtn = 34;
+
+	/* memory stats */
+    optional double frmpg = 35;
+    optional double bufpg = 36;
+    optional double campg = 37;
+
+    /* disk statistics */
+    message SarDiskInfo {
+        optional double tps = 1;
+        optional double rd_sec = 2;
+        optional double wr_sec = 3;
+        optional double avgrq_sz = 4;
+        optional double avgqu_sz = 5;
+        optional double await = 6;
+        optional double svctm = 7;
+        optional double util = 8;
+        optional string dev_name = 9;
+    }
+    repeated SarDiskInfo sar_disk_info = 38;
+}
