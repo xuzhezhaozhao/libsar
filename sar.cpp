@@ -23,6 +23,7 @@
 
 /* Maximum length of network interface name */
 const int MAX_IFACE_LEN = IFNAMSIZ;
+const int MAX_NAME_LEN = 16;
 
 /* Maximum length of disk name */
 const int MAX_DISK_LEN = 16;
@@ -36,6 +37,8 @@ const int MAX_PF_NAME = 1024;
 const int NR_IFACE_PREALLOC = 2;
 const int NR_DEV_PREALLOC = 4;
 const int NR_DISK_PREALLOC = 3;
+
+const bool ALLOW_VIRTUAL = false;
 
 /* Files */
 const char * const STAT = "/proc/stat";
@@ -419,6 +422,35 @@ static int get_sysfs_dev_nr(int display_partitions)
     return dev;
 }
 
+/*
+ * Test whether given name is a device or a partition, using sysfs.
+ * This is more straightforward that using ioc_iswhole() function from
+ * ioconf.c which should be used only with kernels that don't have sysfs.
+ *
+ * IN:
+ * @name		Device or partition name.
+ * @allow_virtual	TRUE if virtual devices are also accepted.
+ *			The device is assumed to be virtual if no
+ *			/sys/block/<device>/device link exists.
+ *
+ * RETURNS:
+ * TRUE if @name is not a partition.
+ */
+static int is_device(char *name, int allow_virtual)
+{
+    char syspath[PATH_MAX];
+    char *slash;
+
+    /* Some devices may have a slash in their name (eg. cciss/c0d0...) */
+    while ((slash = strchr(name, '/'))) {
+        *slash = '!';
+    }
+    snprintf(syspath, sizeof(syspath), "%s/%s%s", SYSFS_BLOCK, name,
+            allow_virtual ? "" : "/device");
+
+    return !(access(syspath, F_OK));
+}
+
 
 /*
  * Find number of devices and partitions available in /proc/diskstats.
@@ -441,12 +473,13 @@ static int get_diskstats_dev_nr(int count_part, int only_used_dev)
      */
     int dev = 0;
     char line[256];
+	char dev_name[MAX_NAME_LEN];
     while (fgets(line, 256, fp) != NULL) {
         if (!count_part) {
             unsigned long rd_ios, wr_ios;
-            int i = sscanf(line, "%*d %*d %*s %lu %*u %*u %*u %lu",
-                    &rd_ios, &wr_ios);
-            if (i == 1) {
+            int i = sscanf(line, "%*d %*d %s %lu %*u %*u %*u %lu",
+                    dev_name, &rd_ios, &wr_ios);
+            if (i == 2 || !is_device(dev_name, ALLOW_VIRTUAL)) {
                 /* It was a partition and not a device */
                 continue;
             }
@@ -574,14 +607,10 @@ static int get_net_dev(void)
 }
 
 
-
-
 /*
- ***************************************************************************
  * Get device real name if possible.
  * Warning: This routine may return a bad name on 2.4 kernels where
  * disk activities are read from /proc/stat.
- ***************************************************************************
  */
 static char *get_devname(unsigned int major, unsigned int minor, int pretty)
 {
@@ -608,7 +637,6 @@ static int read_proc_stat(FileStats &file_stats, int curr)
 {
     FILE *fp;
     if ((fp = fopen(STAT, "r")) == NULL) {
-        /* exit(2); */
         return -1;
     }
 
@@ -1092,20 +1120,27 @@ static int read_diskstats_stat(FileStats &file_stats, int curr)
     init_dk_drive_stat(file_stats);
 
     int dsk = 0;
-    static char line[256];
+    char line[256];
+    char dev_name[MAX_NAME_LEN];
     while ((fgets(line, 256, fp) != NULL) && (dsk < g_disk_nr)) {
         unsigned int major, minor;
         unsigned long rd_ios, wr_ios, rd_ticks, wr_ticks;
         unsigned long tot_ticks, rq_ticks;
         unsigned long long rd_sec, wr_sec;
-        if (sscanf(line, "%u %u %*s %lu %*u %llu %lu %lu %*u %llu"
+        if (sscanf(line, "%u %u %s %lu %*u %llu %lu %lu %*u %llu"
                     " %lu %*u %lu %lu",
                     &major, &minor,
+                    dev_name,
                     &rd_ios, &rd_sec, &rd_ticks, &wr_ios, &wr_sec, &wr_ticks,
-                    &tot_ticks, &rq_ticks) == 10) {
+                    &tot_ticks, &rq_ticks) == 11) {
             /* It's a device and not a partition */
             if (!rd_ios && !wr_ios) {
                 /* Unused device: ignore it */
+                continue;
+            }
+
+            if (!is_device(dev_name, ALLOW_VIRTUAL)) {
+                /* not read patitions */;
                 continue;
             }
             DiskStats *disk_stats_i = disk_stats[curr] + dsk++;
@@ -1630,7 +1665,7 @@ int get_sar_info(SarInfo &sar_info) {
         sar_disk_info->set_await( await );
         sar_disk_info->set_svctm( svctm );
         sar_disk_info->set_util( util );
-        if (!dev_name) {
+        if (dev_name) {
             sar_disk_info->set_dev_name( dev_name );
         }
     }
