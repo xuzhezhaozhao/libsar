@@ -1634,7 +1634,7 @@ int get_sar_info(SarInfo &sar_info) {
         sdj = disk_stats[prev] + j;
 
         double tput = ((double) (sdi->nr_ios - sdj->nr_ios)) * g_hz / itv;
-        double util = s_value(sdj->tot_ticks, sdi->tot_ticks, itv);
+        double util = std::max(100.0, s_value(sdj->tot_ticks, sdi->tot_ticks, itv));
         double svctm = tput ? util / tput : 0.0;
         double await = (sdi->nr_ios - sdj->nr_ios) ?
             ((sdi->rd_ticks - sdj->rd_ticks) + (sdi->wr_ticks - sdj->wr_ticks)) /
